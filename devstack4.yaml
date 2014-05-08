@@ -1,0 +1,83 @@
+heat_template_version: 2013-05-23
+description: "Heat demo template for wait conditions"
+
+parameters:
+  instance_type:
+    default: m1.medium
+    description: "Type of instance (flavor) to be used"
+    label: "Instance Type"
+    type: string
+  key_name:
+    description: "Name of key-pair to be used for compute instance"
+    label: "Key Name"
+    type: string
+    default: default
+
+resources:
+  service1:
+    type: "OS::Nova::Server"
+    properties:
+      flavor: m1.medium
+      image: devstack2
+      key_name:
+        get_param: key_name
+      user_data:
+        str_replace:
+          template: |
+              #!/bin/bash -v
+              echo "deb http://10.135.126.20:81/latest trusty main" > /etc/apt/sources.list
+              apt-get update
+              apt-get -y --force-yes install mypackage
+              echo "Listen 81" >> /etc/apache2/ports.conf
+              echo "<VirtualHost *:81>" >> /etc/apache2/sites-enabled/repo.conf
+              echo "        ServerAdmin webmaster@localhost" >> /etc/apache2/sites-enabled/repo.conf
+              echo "        DocumentRoot /var/www/" >> /etc/apache2/sites-enabled/repo.conf
+              echo "        ErrorLog ${APACHE_LOG_DIR}/error.log" >> /etc/apache2/sites-enabled/repo.conf
+              echo "        CustomLog ${APACHE_LOG_DIR}/access.log combined" >> /etc/apache2/sites-enabled/repo.conf
+              echo "</VirtualHost>" >> /etc/apache2/sites-enabled/repo.conf
+              service apache2 restart
+              cat /dev/null > /opt/stack/logs/stack.sh.log.summary
+              pkgStatus=`dpkg -l | grep mypackage | wc -l`
+              stackStatus=`cat /opt/stack/logs/stack.sh.log.summary | grep "stack.sh completed"  | wc -l`
+              while [ $stackStatus -eq 0 ]
+              do
+              sleep 5
+              pkgStatus=`dpkg -l | grep mypackage | wc -l`
+              stackStatus=`cat /opt/stack/logs/stack.sh.log.summary | grep "stack.sh completed"  | wc -l`
+              done
+              sleep 20
+              hostname=`ifconfig eth0 | grep "inet addr" | awk {' print $2 '} | cut -d: -f2`
+              export OS_AUTH_URL=http://$hostname:5000/v2.0
+              export OS_USERNAME=admin
+              export OS_PASSWORD=cloud
+              export OS_TENANT_NAME=demo
+              endpoints=`/usr/local/bin/keystone endpoint-list | tr "\\n" ","`
+              curl -X PUT -H 'Content-Type:application/json' \
+                   -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "SERVICE1","Data" : "'"$endpoints"'"}' \
+                   "$wait_handle$"
+
+          params:
+            $wait_handle$:
+              get_resource: service1_wait_handle
+
+  service1_floating:
+    type: "AWS::EC2::EIP"
+
+  service1_floating_association:
+    type: "AWS::EC2::EIPAssociation"
+    properties:
+      EIP:
+        Ref: service1_floating
+      InstanceId:
+        Ref: service1
+
+  service1_wait:
+    type: "AWS::CloudFormation::WaitCondition"
+    depends_on: service1
+    properties:
+      Handle:
+        get_resource: service1_wait_handle
+      Timeout: 10000
+
+  service1_wait_handle:
+    type: "AWS::CloudFormation::WaitConditionHandle"
