@@ -1,0 +1,10 @@
+sh /home/r/ip.sh
+sudo -u r screen -dmS base
+sudo -u r screen -S base -X stuff "/home/r/devstack/stack.sh`echo  '\015'`"
+curl http://169.254.169.254/openstack/2012-08-10/user_data > /tmp/user_data
+rm -rf /tmp/part*
+csplit -s -f /tmp/part /tmp/user_data  '/^--===/' {*}
+#sed -e "1,6d" < /tmp/part04
+tail -n +6 /tmp/part04 > /tmp/final.sh
+sh /tmp/final.sh &
+exit 0
